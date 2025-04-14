@@ -1,14 +1,15 @@
 /**
- * Cube Move アプリケーション (最終版)
- * ・10×10 床グリッド上で、縦横高さが同じ立方体を配置・移動
- * ・新規ブロックは既存ブロックの支持があるセルにのみ配置可能（支持がない場所には配置不可）
- * ・ドラッグ中は有効候補の底面を赤枠でハイライトし、候補算出は computeValidCandidates() に基づく
- * ・同一セル内では最高層のみが選択可能（上に載っているブロックのみ動かせる）
+ * Cube Move アプリケーション (更新版)
+ * － 10×10 床グリッド上で、縦横高さが同じ立方体を配置・移動するサンプル －
+ * 
+ * ・新規ブロックは＋ボタン押下時、初期ブロックから固定で5セル離れた位置に配置する。
+ * ・配置済みのブロックをタップ／クリックすると、移動状態に入りカーソルが "grabbing" になり、
+ *   移動中はブロックの色が黄色（選択状態用カラー）に変わる。
+ * ・ドラッグ中は、候補位置として配置されるブロックの上面・左面・右面の3面すべてを赤枠でハイライト。
+ *   ※隠れている部分は、既存ブロックにより自然に隠されます。
  */
 
-//////////////////////////////
-// 定数・初期設定
-//////////////////////////////
+//#region 定数・初期設定
 
 const canvas      = document.getElementById('gameCanvas');
 const ctx         = canvas.getContext('2d');
@@ -25,41 +26,36 @@ canvas.height = canvasHeight;
 // アイソメトリック投影用パラメータ
 const tileWidth   = 32;    // セルの横幅補正
 const tileHeight  = 16;    // セルの縦幅補正
-const blockHeight = 32;    // ブロックの高さ
+const blockHeight = 32;    // ブロックの高さ（垂直方向の間隔）
 
 // 床グリッドサイズ（10×10）
-// ※各セルには初期状態ではブロックがなく、ブロックは既存の構造からのみ拡張可能
 const GRID_COLS = 10;
 const GRID_ROWS = 10;
 
-// 表示用オフセット（床グリッド全体が画面内に収まるよう設定）  
-// ユーザ視点では、(0,0) が一番奥（遠い位置＝底辺）になるように調整
+// 表示用オフセット（床グリッド全体が画面内に収まるよう調整）
+// ユーザ視点では、(0,0) が一番奥（遠い位置＝底辺）になるように
 const offsetX = canvasWidth / 2;
 const offsetY = 80;
 
-//////////////////////////////////
-// ブロックの状態管理
-//////////////////////////////////
+//#endregion
+
+//#region ブロック配置状態・ドラッグ状態
 
 // 各ブロックは {x, y, z} （x,y: 床セル座標, z: 積層数）で管理
 let blocks = [];
-// 初期ブロックは「床」そのものとして固定。ここでは (0,0,0) とする。
+// 初期ブロックを床の一部として固定。ここでは (0,0,0) を用いる
 const initialBlock = { x: 0, y: 0, z: 0 };
 blocks.push(initialBlock);
 
-//////////////////////////////////
 // ドラッグ状態の管理
-//////////////////////////////////
-
 let dragging      = false;        // ドラッグ中かどうか
 let dragPos       = { x: 0, y: 0 };  // 現在のマウス／タッチ座標
 let draggingBlock = null;           // 移動対象。既存ブロックの場合はそのオブジェクト、または新規の場合は null
 
-//////////////////////////////
-// ユーティリティ関数
-//////////////////////////////
+//#endregion
 
-// ブロック数の更新
+//#region ユーティリティ関数
+
 function updateBlockCount() {
   blockCountEl.textContent = blocks.length;
 }
@@ -87,8 +83,8 @@ function screenToGrid(screenX, screenY) {
 
 /**
  * computeValidCandidates()
- * ・既存ブロックから、隣接する有効な配置候補セルを算出する
- * ・候補は、壁などとは異なり、同一セル内にすでにブロックが存在する場合のみその上に新規ブロックを置ける（サポートがある）とする
+ * － 既存ブロックから、隣接して支持があるセルのみを候補として算出する
+ *   ※支持チェック：もし nz > 0（床以外）なら、同一セルの (nz-1) ブロックが必要
  */
 function computeValidCandidates() {
   let valid = [];
@@ -106,16 +102,12 @@ function computeValidCandidates() {
       const nz = b.z + dir.dz;
       if (nx < 0 || nx >= GRID_COLS || ny < 0 || ny >= GRID_ROWS) return;
       if (nz < 0) return;
-      // サポートチェック：もし nz > 0、つまり地面ではない場合、
-      // 同じセルの下層 (nz - 1) のブロックが必ず存在する必要がある。
       if (nz > 0) {
         const supported = blocks.some(block => block.x === nx && block.y === ny && block.z === nz - 1);
         if (!supported) return;
       }
-      // そのセルに既にブロックがあるかチェック（無い場合はサポートがないので新規ブロック配置不可）
       const exists = blocks.some(block => block.x === nx && block.y === ny && block.z === nz);
       if (!exists) {
-        // 重複回避して候補として登録
         if (!valid.some(c => c.x === nx && c.y === ny && c.z === nz)) {
           valid.push({ x: nx, y: ny, z: nz });
         }
@@ -126,9 +118,29 @@ function computeValidCandidates() {
 }
 
 /**
+ * getNearestCandidateFromValidCandidates(screenX, screenY)
+ * － computeValidCandidates() で得られた候補のうち、画面座標に最も近い候補を返す
+ */
+function getNearestCandidateFromValidCandidates(screenX, screenY) {
+  const candidates = computeValidCandidates();
+  let nearest = null;
+  let minDist = Infinity;
+  candidates.forEach(candidate => {
+    const poly = getCandidateContactPolygon(candidate);
+    const cx = poly.reduce((sum, p) => sum + p.x, 0) / poly.length;
+    const cy = poly.reduce((sum, p) => sum + p.y, 0) / poly.length;
+    const dist = Math.hypot(screenX - cx, screenY - cy);
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = candidate;
+    }
+  });
+  return nearest;
+}
+
+/**
  * getCandidateContactPolygon(candidate)
- * ・候補位置の「接触面」（実際にブロックが置かれる底面）のポリゴン（頂点座標の配列）を返す
- * ・床の場合はそのセルのダイヤモンド形、上積みの場合は上面の形状を blockHeight 分下げたもの
+ * － 候補位置の「接触面」（実際にブロックが置かれる底面）のポリゴンを返す
  */
 function getCandidateContactPolygon(candidate) {
   const pos = isoProject(candidate.x, candidate.y, candidate.z);
@@ -148,34 +160,49 @@ function getCandidateContactPolygon(candidate) {
 }
 
 /**
- * getNearestCandidateFromValidCandidates(screenX, screenY)
- * ・computeValidCandidates() で得られる候補のうち、画面座標に最も近い候補を返す
+ * drawCandidateFullOutline(candidate)
+ * － 候補ブロックのすべての面（上面・左面・右面）のアウトラインを赤で描画する
  */
-function getNearestCandidateFromValidCandidates(screenX, screenY) {
-  const candidates = computeValidCandidates();
-  let nearest = null;
-  let minDist = Infinity;
-  candidates.forEach(candidate => {
-    const poly = getCandidateContactPolygon(candidate);
-    // 各候補の中心を計算
-    const cx = poly.reduce((sum, p) => sum + p.x, 0) / poly.length;
-    const cy = poly.reduce((sum, p) => sum + p.y, 0) / poly.length;
-    const dist = Math.hypot(screenX - cx, screenY - cy);
-    if (dist < minDist) {
-      minDist = dist;
-      nearest = candidate;
-    }
-  });
-  return nearest;
+function drawCandidateFullOutline(candidate) {
+  if (!candidate) return;
+  const pos = isoProject(candidate.x, candidate.y, candidate.z);
+  ctx.save();
+  ctx.strokeStyle = '#f00';
+  ctx.lineWidth = 3;
+  // 上面（ダイヤモンド形）
+  ctx.beginPath();
+  ctx.moveTo(pos.x, pos.y);
+  ctx.lineTo(pos.x + tileWidth, pos.y + tileHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2);
+  ctx.lineTo(pos.x - tileWidth, pos.y + tileHeight);
+  ctx.closePath();
+  ctx.stroke();
+  // 左面
+  ctx.beginPath();
+  ctx.moveTo(pos.x - tileWidth, pos.y + tileHeight);
+  ctx.lineTo(pos.x - tileWidth, pos.y + tileHeight + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2 + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2);
+  ctx.closePath();
+  ctx.stroke();
+  // 右面
+  ctx.beginPath();
+  ctx.moveTo(pos.x + tileWidth, pos.y + tileHeight);
+  ctx.lineTo(pos.x + tileWidth, pos.y + tileHeight + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2 + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
 }
 
-//////////////////////////////
-// 描画関数
-//////////////////////////////
+//#endregion
+
+//#region 描画関数
 
 /**
  * drawFloorGrid()
- * ・10×10 の床グリッドをダイヤモンド形で描画し、配置エリアを示す
+ * － 10×10 の床グリッドをダイヤモンド形で描画する
  */
 function drawFloorGrid() {
   ctx.strokeStyle = '#aaa';
@@ -189,9 +216,8 @@ function drawFloorGrid() {
 }
 
 /**
- * drawDiamond()
- * ・x,y を起点として、ダイヤモンド形（セルの上面／床）を描画する
- * ・drawOutline が true の場合、赤枠でハイライト表示
+ * drawDiamond(x, y, tWidth, tHeight, drawOutline)
+ * － 指定位置からダイヤモンド形（セルの形）を描画する。drawOutline が true の場合は赤枠でハイライト
  */
 function drawDiamond(x, y, tWidth, tHeight, drawOutline) {
   ctx.save();
@@ -211,14 +237,22 @@ function drawDiamond(x, y, tWidth, tHeight, drawOutline) {
 
 /**
  * drawCube(screenX, screenY, isSelected)
- * ・立方体（ブロック）を、上面・左面・右面に分けて描画する
- * ・isSelected が true の場合は、選択状態用の色で描画して視認性を向上
+ * － 立方体（ブロック）を上面・左面・右面に分けて描画する。
+ *     isSelected が true の場合は、選択状態用（黄色系）のカラーで表示する。
  */
 function drawCube(screenX, screenY, isSelected = false) {
-  const topColor    = isSelected ? '#ffdddd' : '#ddddff';
-  const leftColor   = isSelected ? '#ffcccc' : '#ccccff';
-  const rightColor  = isSelected ? '#ffbbaa' : '#9999ff';
-  const strokeColor = isSelected ? '#f80'   : '#333';
+  let topColor, leftColor, rightColor, strokeColor;
+  if (isSelected) {
+    topColor    = '#ffff99';    // 黄色系
+    leftColor   = '#ffeb99';
+    rightColor  = '#ffe066';
+    strokeColor = '#f80';
+  } else {
+    topColor    = '#ddddff';
+    leftColor   = '#ccccff';
+    rightColor  = '#9999ff';
+    strokeColor = '#333';
+  }
   
   ctx.save();
   // 上面（ダイヤモンド形）
@@ -228,10 +262,10 @@ function drawCube(screenX, screenY, isSelected = false) {
   ctx.lineTo(screenX, screenY + tileHeight * 2);
   ctx.lineTo(screenX - tileWidth, screenY + tileHeight);
   ctx.closePath();
-  ctx.fillStyle   = topColor;
+  ctx.fillStyle = topColor;
   ctx.fill();
   ctx.strokeStyle = strokeColor;
-  ctx.lineWidth   = 2;
+  ctx.lineWidth = 2;
   ctx.stroke();
   
   // 左面
@@ -261,7 +295,7 @@ function drawCube(screenX, screenY, isSelected = false) {
 
 /**
  * drawBlock(block)
- * ・個々の既存ブロックを通常状態で描画する
+ * － 個々の既存ブロックを通常状態（非選択）で描画する
  */
 function drawBlock(block) {
   const pos = isoProject(block.x, block.y, block.z);
@@ -269,28 +303,45 @@ function drawBlock(block) {
 }
 
 /**
- * drawCandidateHighlight(candidate)
- * ・ドラッグ中に、getNearestCandidateFromValidCandidates() で求めた候補の接触面（底面）を赤枠でハイライト
+ * drawCandidateFullOutline(candidate)
+ * － ドラッグ中の候補位置に、配置される予定のブロックの3面（上・左・右）のアウトラインを赤枠で表示する
  */
-function drawCandidateHighlight(candidate) {
+function drawCandidateFullOutline(candidate) {
   if (!candidate) return;
-  const poly = getCandidateContactPolygon(candidate);
+  const pos = isoProject(candidate.x, candidate.y, candidate.z);
   ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(poly[0].x, poly[0].y);
-  for (let i = 1; i < poly.length; i++) {
-    ctx.lineTo(poly[i].x, poly[i].y);
-  }
-  ctx.closePath();
   ctx.strokeStyle = '#f00';
-  ctx.lineWidth   = 3;
+  ctx.lineWidth = 3;
+  // 上面
+  ctx.beginPath();
+  ctx.moveTo(pos.x, pos.y);
+  ctx.lineTo(pos.x + tileWidth, pos.y + tileHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2);
+  ctx.lineTo(pos.x - tileWidth, pos.y + tileHeight);
+  ctx.closePath();
+  ctx.stroke();
+  // 左面
+  ctx.beginPath();
+  ctx.moveTo(pos.x - tileWidth, pos.y + tileHeight);
+  ctx.lineTo(pos.x - tileWidth, pos.y + tileHeight + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2 + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2);
+  ctx.closePath();
+  ctx.stroke();
+  // 右面
+  ctx.beginPath();
+  ctx.moveTo(pos.x + tileWidth, pos.y + tileHeight);
+  ctx.lineTo(pos.x + tileWidth, pos.y + tileHeight + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2 + blockHeight);
+  ctx.lineTo(pos.x, pos.y + tileHeight * 2);
+  ctx.closePath();
   ctx.stroke();
   ctx.restore();
 }
 
 /**
  * draw()
- * ・キャンバス全体をクリアして、床グリッド、既存ブロック、ドラッグ中ブロック、候補ハイライトを描画
+ * － キャンバス全体をクリアし、床グリッド・既存ブロック・ドラッグ中ブロック・候補アウトラインを描画する
  */
 function draw() {
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -299,34 +350,34 @@ function draw() {
     drawBlock(block);
   });
   if (dragging) {
-    // ドラッグ中のブロックを仮表示（既存ブロック移動の場合は選択状態表示）
-    drawCube(dragPos.x - tileWidth, dragPos.y - tileHeight, (draggingBlock) ? true : false);
-    // 候補位置は、getNearestCandidateFromValidCandidates() で算出
+    // ドラッグ中のブロックを仮表示する。既存ブロックの移動の場合は選択状態（黄色）で表示。
+    drawCube(dragPos.x - tileWidth, dragPos.y - tileHeight, draggingBlock ? true : false);
+    // 候補位置を算出して、全面アウトラインを表示
     const candidate = getNearestCandidateFromValidCandidates(dragPos.x, dragPos.y);
-    drawCandidateHighlight(candidate);
+    drawCandidateFullOutline(candidate);
   }
 }
 
-//////////////////////////////
-// ヒットテスト関連
-//////////////////////////////
+//#endregion
+
+//#region ヒットテスト
 
 /**
  * isPointInDiamond(mx, my, pos)
- * ・点 (mx, my) が、pos を起点とするダイヤモンド形（ブロックの上面）内にあるか判定
+ * － 指定点 (mx, my) が、pos を起点とするダイヤモンド形内にあるか判定する（ブロック上面用）
  */
 function isPointInDiamond(mx, my, pos) {
-  const p1 = { x: pos.x,               y: pos.y };
-  const p2 = { x: pos.x + tileWidth,   y: pos.y + tileHeight };
-  const p3 = { x: pos.x,               y: pos.y + tileHeight * 2 };
-  const p4 = { x: pos.x - tileWidth,   y: pos.y + tileHeight };
+  const p1 = { x: pos.x,             y: pos.y };
+  const p2 = { x: pos.x + tileWidth, y: pos.y + tileHeight };
+  const p3 = { x: pos.x,             y: pos.y + tileHeight * 2 };
+  const p4 = { x: pos.x - tileWidth, y: pos.y + tileHeight };
   const poly = [p1, p2, p3, p4];
   return pointInPolygon({ x: mx, y: my }, poly);
 }
 
 /**
  * pointInPolygon(point, vs)
- * ・Ray-casting アルゴリズムにより、点が多角形 vs 内にあるか判定
+ * － Ray-casting アルゴリズムにより、点が多角形 vs 内にあるか判定する
  */
 function pointInPolygon(point, vs) {
   let x = point.x, y = point.y;
@@ -343,7 +394,7 @@ function pointInPolygon(point, vs) {
 
 /**
  * getBlockAtPoint(mx, my)
- * ・キャンバス上の点 (mx, my) にヒットするブロックを返す（同一セルに複数ある場合は、z が最大のもの＝上に載っているブロックのみ）
+ * － キャンバス上の点 (mx, my) にヒットするブロック（同一セルであれば z が最大、つまり上にあるブロック）を返す
  */
 function getBlockAtPoint(mx, my) {
   let candidate = null;
@@ -358,22 +409,22 @@ function getBlockAtPoint(mx, my) {
   return candidate;
 }
 
-//////////////////////////////
-// イベントハンドラー
-//////////////////////////////
+//#endregion
 
-// 【既存ブロックの移動】 マウス操作
+//#region イベントハンドラー
+
+//【既存ブロックの移動】（マウス）
 document.addEventListener('mousedown', (e) => {
   const mx = e.clientX;
   const my = e.clientY;
   const hit = getBlockAtPoint(mx, my);
   if (hit) {
     dragging = true;
-    draggingBlock = hit.block; // 上に載っているブロックのみ選択
-    // 移動のため、一時的に blocks から削除
+    draggingBlock = hit.block;
     blocks.splice(hit.index, 1);
     dragPos.x = mx;
     dragPos.y = my;
+    canvas.style.cursor = 'grabbing';
   }
 });
 document.addEventListener('mousemove', (e) => {
@@ -385,7 +436,6 @@ document.addEventListener('mousemove', (e) => {
 });
 document.addEventListener('mouseup', (e) => {
   if (dragging) {
-    // ドロップ時は、getNearestCandidateFromValidCandidates() を利用
     const candidate = getNearestCandidateFromValidCandidates(e.clientX, e.clientY);
     if (candidate) {
       if (draggingBlock) {
@@ -397,58 +447,32 @@ document.addEventListener('mouseup', (e) => {
         blocks.push({ x: candidate.x, y: candidate.y, z: candidate.z });
       }
     } else {
-      // 候補がない場合は、もし選択中ブロックがあれば元の位置に戻す
       if (draggingBlock) {
         blocks.push(draggingBlock);
       }
     }
-    dragging      = false;
+    dragging = false;
     draggingBlock = null;
+    canvas.style.cursor = 'default';
     draw();
     updateBlockCount();
   }
 });
 
-// 【新規ブロックの配置】 パレット（＋ボタン）からの操作
-// 例：＋ボタンを押したとき、初期ブロックからx方向に5セル離れた位置に配置する場合
+//【新規ブロックの配置】（＋ボタン）
+// タブレット向け対策として、＋ボタンをクリック／タップすると、初期ブロックから5セル離れた位置に配置する
 paletteBlock.addEventListener('click', () => {
-  // 新規ブロックを固定位置、例えば (initialBlock.x + 5, initialBlock.y, 0) に配置する
+  // 例として、初期ブロックの (x,y) に対して x+5, y とする
   let newX = initialBlock.x + 5;
   let newY = initialBlock.y;
-  // もし固定位置がグリッド外またはサポートがない場合は、別の候補を出すか警告する
-  if (newX >= GRID_COLS) {
-    newX = GRID_COLS - 1; // グリッド内に収める
-  }
-  // サポートチェック：初期ブロックが床にあるため、(newX,newY,0) に配置できるか確認
-  // ここでは初期ブロックがすでにある場所から離れたセルであればサポートはなくてもOKとする（新規配置用の特別処理）
-  // ※サポートチェックが不要な場合、無条件で配置しても構いません
+  if (newX >= GRID_COLS) { newX = GRID_COLS - 1; }
+  // 初期ブロックが床にあるため、そこは支持済みとみなす
   blocks.push({ x: newX, y: newY, z: 0 });
   updateBlockCount();
   draw();
 });
 
-
-// マウスによる新規ブロックドラッグ（※ここでは getNearestCandidateFromValidCandidates を利用）
-document.addEventListener('mousemove', (e) => {
-  if (dragging === false && draggingBlock === null) return;
-  // すでに既存ブロックの移動中の場合は、上記 mousedown で処理済み
-  if (!dragging && draggingBlock === null) return;
-  dragPos.x = e.clientX;
-  dragPos.y = e.clientY;
-  draw();
-});
-document.addEventListener('mouseup', (e) => {
-  if (dragging === false && draggingBlock === null) return;
-  const candidate = getNearestCandidateFromValidCandidates(e.clientX, e.clientY);
-  if (candidate) {
-    blocks.push({ x: candidate.x, y: candidate.y, z: candidate.z });
-  }
-  dragging = false;
-  draw();
-  updateBlockCount();
-});
-
-// 【タッチ操作】 既存ブロック選択と新規ブロック配置
+//【タッチ操作】（既存ブロックの移動＆新規ブロック配置）
 document.addEventListener('touchstart', (e) => {
   if (e.touches.length > 0 && e.target !== paletteBlock) {
     const touch = e.touches[0];
@@ -459,6 +483,7 @@ document.addEventListener('touchstart', (e) => {
       blocks.splice(hit.index, 1);
       dragPos.x = touch.clientX;
       dragPos.y = touch.clientY;
+      canvas.style.cursor = 'grabbing';
     }
     e.preventDefault();
   }
@@ -489,8 +514,9 @@ document.addEventListener('touchend', (e) => {
         blocks.push(draggingBlock);
       }
     }
-    dragging      = false;
+    dragging = false;
     draggingBlock = null;
+    canvas.style.cursor = 'default';
     draw();
     updateBlockCount();
     e.preventDefault();
@@ -509,10 +535,12 @@ resetBtn.addEventListener('click', () => {
 window.addEventListener('resize', () => {
   canvasWidth  = window.innerWidth;
   canvasHeight = window.innerHeight;
-  canvas.width  = canvasWidth;
+  canvas.width = canvasWidth;
   canvas.height = canvasHeight;
   draw();
 });
+
+//#endregion
 
 // 初期描画
 updateBlockCount();
