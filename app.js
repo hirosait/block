@@ -356,28 +356,24 @@ document.addEventListener('mouseup', (e) => {
 });
 
 // パレットからの新規ブロックドラッグ（マウス）
-paletteBlock.addEventListener('mousedown', (e) => {
-  dragging = true;
-  draggingBlock = null;  // 新規ブロック
-});
-document.addEventListener('mousemove', (e) => {
-  if (dragging && draggingBlock === null) {
-    dragPos.x = e.clientX;
-    dragPos.y = e.clientY;
-    draw();
+paletteBlock.addEventListener('click', () => {
+  // 例えば、既存ブロックが1つもなければ、デフォルトは床の中央に配置
+  let newBlock;
+  if (blocks.length === 0) {
+    newBlock = { x: Math.floor(GRID_COLS / 2), y: Math.floor(GRID_ROWS / 2), z: 0 };
+  } else {
+    // 既存ブロックの中で、例えば最も右下にあるブロックを見つけ、その右下に少しずらして配置する
+    const maxBlock = blocks.reduce((prev, curr) => {
+      return (curr.x + curr.y > prev.x + prev.y) ? curr : prev;
+    });
+    // 既存ブロックがあるセルに隣接するセルを検討（ここは調整が必要）
+    newBlock = { x: Math.min(maxBlock.x + 1, GRID_COLS - 1), y: Math.min(maxBlock.y + 1, GRID_ROWS - 1), z: 0 };
   }
+  blocks.push(newBlock);
+  updateBlockCount();
+  draw();
 });
-document.addEventListener('mouseup', (e) => {
-  if (dragging && draggingBlock === null) {
-    const candidate = getCandidateFromScreen(e.clientX, e.clientY);
-    if (candidate) {
-      blocks.push({ x: candidate.x, y: candidate.y, z: candidate.z });
-    }
-    dragging = false;
-    draw();
-    updateBlockCount();
-  }
-});
+
 
 // タッチ操作対応（既存ブロック選択）
 document.addEventListener('touchstart', (e) => {
