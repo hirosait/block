@@ -159,37 +159,37 @@ function drawBlock(block) {
  * ・候補が床以外の場合は、必ず候補の下（同じ x,y, z-1）にブロックが存在することが必要。
  */
 function computeValidCandidates() {
-  let valid = [];
-  const directions = [
-    { dx: -1, dy: 0, dz: 0 },
-    { dx: 1,  dy: 0, dz: 0 },
-    { dx: 0,  dy: -1, dz: 0 },
-    { dx: 0,  dy: 1,  dz: 0 },
-    { dx: 0,  dy: 0, dz: 1 }
-  ];
-  blocks.forEach(b => {
-    directions.forEach(dir => {
-      const nx = b.x + dir.dx;
-      const ny = b.y + dir.dy;
-      const nz = b.z + dir.dz;
-      if (nx < 0 || nx >= GRID_COLS || ny < 0 || ny >= GRID_ROWS) return;
-      if (nz < 0) return;
-      // もし床以外（nz > 0）なら、下部が既に存在している必要がある
-      if (nz > 0) {
-        const supported = blocks.some(block => block.x === nx && block.y === ny && block.z === nz - 1);
-        if (!supported) return;
-      }
-      // すでにブロックが存在していないかチェック
-      const exists = blocks.some(block => block.x === nx && block.y === ny && block.z === nz);
-      if (!exists) {
-        if (!valid.some(c => c.x === nx && c.y === ny && c.z === nz)) {
-          valid.push({ x: nx, y: ny, z: nz });
+    let valid = [];
+    const directions = [
+      { dx: -1, dy: 0, dz: 0 },
+      { dx: 1,  dy: 0, dz: 0 },
+      { dx: 0,  dy: -1, dz: 0 },
+      { dx: 0,  dy: 1,  dz: 0 },
+      { dx: 0,  dy: 0, dz: 1 }
+    ];
+    blocks.forEach(b => {
+      directions.forEach(dir => {
+        const nx = b.x + dir.dx;
+        const ny = b.y + dir.dy;
+        const nz = b.z + dir.dz;
+        if (nx < 0 || nx >= GRID_COLS || ny < 0 || ny >= GRID_ROWS) return;
+        if (nz < 0) return;
+        if (nz > 0) {
+          const supported = blocks.some(block => block.x === nx && block.y === ny && block.z === nz - 1);
+          if (!supported) return;
         }
-      }
+        // すでにブロックがある場合は候補にしない
+        const exists = blocks.some(block => block.x === nx && block.y === ny && block.z === nz);
+        if (!exists) {
+          if (!valid.some(c => c.x === nx && c.y === ny && c.z === nz)) {
+            valid.push({ x: nx, y: ny, z: nz });
+          }
+        }
+      });
     });
-  });
-  return valid;
-}
+    return valid;
+  }
+  
 
 /**
  * 候補位置の「接触面」（＝新ブロックの底面）が置かれる位置のポリゴンを返す。
@@ -451,6 +451,25 @@ window.addEventListener('resize', () => {
   draw();
 });
 
+document.addEventListener('touchstart', (e) => {
+    // もしタッチ開始がパレットからでない場合
+    if (e.touches.length > 0 && e.target !== paletteBlock) {
+      const touch = e.touches[0];
+      const hit = getBlockAtPoint(touch.clientX, touch.clientY);
+      if (hit) {
+        dragging = true;
+        draggingBlock = hit.block;
+        // ドラッグ開始時は、再配置用に既存ブロックを一時的に除外
+        blocks.splice(hit.index, 1);
+        // タッチの場合も、初期位置を更新
+        dragPos.x = touch.clientX;
+        dragPos.y = touch.clientY;
+      }
+      e.preventDefault();
+    }
+  });
+  
 // 初期描画
 updateBlockCount();
 draw();
+
